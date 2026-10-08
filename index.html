@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Симулятор беспилотного самосвала</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111419;
+      --panel: #1a1f27;
+      --accent: #ffa726;
+      --muted: #8892a0;
+      --good: #66bb6a;
+      --warn: #ef5350;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: #f2f5f8;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    #leftPanel {
+      width: 360px;
+      background: var(--panel);
+      border-right: 1px solid #2a313c;
+      padding: 14px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      font-weight: 650;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+
+    .row.wrap {
+      flex-wrap: wrap;
+    }
+
+    button,
+    select {
+      border: 1px solid #333c48;
+      background: #242b35;
+      color: #f2f5f8;
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+
+    button:hover,
+    select:hover {
+      border-color: #4a586a;
+    }
+
+    button.active {
+      background: #3a2a12;
+      border-color: var(--accent);
+      color: #ffd08a;
+    }
+
+    .meter {
+      width: 100%;
+      height: 12px;
+      background: #2e3643;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid #3c4654;
+      margin-top: 4px;
+    }
+
+    .meter > div {
+      height: 100%;
+      transition: width 0.2s linear;
+    }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .label {
+      font-size: 13px;
+      color: #d7dde5;
+      margin-top: 8px;
+      margin-bottom: 2px;
+    }
+
+    .card {
+      background: #202733;
+      border: 1px solid #2f3744;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+
+    #main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      box-sizing: border-box;
+    }
+
+    canvas {
+      border: 1px solid #2f3744;
+      border-radius: 12px;
+      background: #111820;
+      max-width: 100%;
+      max-height: calc(100vh - 32px);
+    }
+
+    .sensorCanvas {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #2f3744;
+      background: radial-gradient(circle at center, #202a35 0, #121821 72%);
+      margin-top: 6px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #c8d0da;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div id="leftPanel">
+    <h1>Беспилотный самосвал</h1>
+    <div class="card">
+      <div class="row wrap">
+        <button id="manualBtn" class="active">Ручной режим</button>
+        <button id="aiBtn">ИИ режим</button>
+      </div>
+      <div class="row">
+        <select id="mapSelect"></select>
+        <button id="resetBtn">Сброс</button>
+      </div>
+      <div class="hint">
+        В ручном режиме: W/S/A/D или стрелки (также русские Ц/Ы/Ф/В), E - действие в зоне.<br />
+        В ИИ режиме самосвал автоматически выполняет рейсы: База -> Погрузка -> Разгрузка.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">Топливо: <span id="fuelText">180.0 л (100%)</span></div>
+      <div class="meter"><div id="fuelBar" style="width: 100%; background: var(--good);"></div></div>
+      <div class="small" id="statusText">Статус: ожидание</div>
+      <div class="small" id="cargoText">Груз: пусто</div>
+      <div class="small" id="opText">Операция: нет</div>
+      <div class="small" id="cycleText">Цикл рейса: --:--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Расходной лист</div>
+      <div class="small">Общий расход: <span id="totalSpentText">0.00%</span></div>
+      <div class="row">
+        <select id="periodSelect">
+          <option value="30">30 сек</option>
+          <option value="60" selected>60 сек</option>
+          <option value="300">5 мин</option>
+        </select>
+        <div class="small">За интервал: <span id="periodSpentText">0.00%</span></div>
+      </div>
+      <div class="small">Текущий рейс: <span id="currentTripText">не активен</span></div>
+      <div class="small">Последний рейс: <span id="lastTripText">нет данных</span></div>
+      <div class="small">Журнал рейсов:</div>
+      <div class="small" id="tripLogText">пока пусто</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Производственная смена</div>
+      <div class="small" id="shiftTimeText">Время смены: 00:00</div>
+      <div class="small" id="shiftTripsText">Рейсы: 0</div>
+      <div class="small" id="shiftTonsText">Тоннаж: 0.0 т</div>
+      <div class="small" id="shiftAvgFuelText">Средний расход/рейс: 0.00%</div>
+      <div class="small" id="shiftAvgTonsText">Средний тоннаж/рейс: 0.0 т</div>
+      <div class="small" id="shiftRateText">Производительность: 0.0 т/ч</div>
+      <div class="row">
+        <button id="exportCsvBtn">Экспорт CSV</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">Окружение</div>
+      <div class="row">
+        <select id="timeSelect">
+          <option value="day" selected>День</option>
+          <option value="dusk">Сумерки</option>
+          <option value="night">Ночь</option>
+        </select>
+        <select id="weatherSelect">
+          <option value="clear" selected>Ясно</option>
+          <option value="fog">Туман</option>
+          <option value="rain">Дождь</option>
+          <option value="dust">Пыль</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">LiDAR 360° (дистанции лучей)</div>
+      <canvas id="lidarCanvas" class="sensorCanvas" width="320" height="180"></canvas>
+      <div class="small">Зеленые лучи - свободно, красные - препятствие рядом.</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Радар 360° (объекты вокруг)</div>
+      <canvas id="radarCanvas" class="sensorCanvas" width="320" height="220"></canvas>
+      <div class="small">Точки - препятствия в радиусе радарного обзора.</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Миникарта (активный маршрут)</div>
+      <canvas id="miniMapCanvas" class="sensorCanvas" width="320" height="220"></canvas>
+    </div>
+  </div>
+
+  <div id="main">
+    <canvas id="simCanvas" width="2400" height="1680"></canvas>
+  </div>
+
+  <script>
+    const TILE = 20;
+    const GRID_W = 120;
+    const GRID_H = 84;
+
+    const simCanvas = document.getElementById("simCanvas");
+    const ctx = simCanvas.getContext("2d");
+    const lidarCanvas = document.getElementById("lidarCanvas");
+    const lidarCtx = lidarCanvas.getContext("2d");
+    const radarCanvas = document.getElementById("radarCanvas");
+    const radarCtx = radarCanvas.getContext("2d");
+    const miniMapCanvas = document.getElementById("miniMapCanvas");
+    const miniMapCtx = miniMapCanvas.getContext("2d");
+
+    const mapSelect = document.getElementById("mapSelect");
+    const manualBtn = document.getElementById("manualBtn");
+    const aiBtn = document.getElementById("aiBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const fuelText = document.getElementById("fuelText");
+    const fuelBar = document.getElementById("fuelBar");
+    const statusText = document.getElementById("statusText");
+    const cargoText = document.getElementById("cargoText");
+    const opText = document.getElementById("opText");
+    const cycleText = document.getElementById("cycleText");
+    const periodSelect = document.getElementById("periodSelect");
+    const totalSpentText = document.getElementById("totalSpentText");
+    const periodSpentText = document.getElementById("periodSpentText");
+    const currentTripText = document.getElementById("currentTripText");
+    const lastTripText = document.getElementById("lastTripText");
+    const tripLogText = document.getElementById("tripLogText");
+    const shiftTimeText = document.getElementById("shiftTimeText");
+    const shiftTripsText = document.getElementById("shiftTripsText");
+    const shiftTonsText = document.getElementById("shiftTonsText");
+    const shiftAvgFuelText = document.getElementById("shiftAvgFuelText");
+    const shiftAvgTonsText = document.getElementById("shiftAvgTonsText");
+    const shiftRateText = document.getElementById("shiftRateText");
+    const exportCsvBtn = document.getElementById("exportCsvBtn");
+    const timeSelect = document.getElementById("timeSelect");
+    const weatherSelect = document.getElementById("weatherSelect");
+
+    const keys = {};
+    let mode = "manual";
+    let clickStart = null;
+
+    const maps = [
+      { id: "north", name: "Северный карьер" },
+      { id: "deep", name: "Глубокий разрез" },
+      { id: "ridge", name: "Каменный хребет" },
+      { id: "west", name: "Западный карьер" },
+      { id: "south", name: "Южный карьер" },
+      { id: "terrace", name: "Террасный карьер (спираль)" }
+    ];
+
+    function hashNoise(x, y, seed) {
+      const n = Math.sin((x * 127.1 + y * 311.7 + seed * 17.7) * 0.09) * 43758.5453;
+      return n - Math.floor(n);
+    }
+
+    function generateMap(type) {
+      const grid = [];
+      const obstacles = [];
+      const seed =
+        type === "north"
+          ? 3
+          : type === "deep"
+          ? 9
+          : type === "ridge"
+          ? 15
+          : type === "west"
+          ? 19
+          : type === "south"
+          ? 25
+          : 31;
+
+      for (let y = 0; y < GRID_H; y++) {
+        const row = [];
+        for (let x = 0; x < GRID_W; x++) {
+          const nx = x / GRID_W;
+          const ny = y / GRID_H;
+          const base = hashNoise(x, y, seed);
+          const slope = Math.abs(hashNoise(x + 11, y - 7, seed + 4) - 0.5) * 2;
+          const rough = hashNoise(x * 2, y * 2, seed + 8);
+          let blocked = false;
+
+          if (type === "north") {
+            blocked = base > 0.89 || (ny < 0.17 && base > 0.7);
+          } else if (type === "deep") {
+            const pit = Math.hypot(nx - 0.5, ny - 0.55);
+            blocked = base > 0.91 || pit < 0.14 || (pit > 0.42 && pit < 0.45);
+          } else if (type === "ridge") {
+            const ridge = Math.abs(ny - (0.2 + 0.5 * nx));
+            blocked = base > 0.9 || ridge < 0.06;
+          } else if (type === "west") {
+            const valley = Math.abs(ny - (0.72 - 0.5 * nx));
+            blocked = base > 0.9 || valley < 0.05;
+          } else if (type === "south") {
+            blocked = base > 0.9 || (ny > 0.72 && base > 0.66) || (nx > 0.82 && ny > 0.5);
+          } else {
+            const terraced = Math.abs(Math.hypot(nx - 0.52, ny - 0.57) - 0.3);
+            blocked = base > 0.93 || terraced < 0.02;
+          }
+
+          if (x < 2 || y < 2 || x > GRID_W - 3 || y > GRID_H - 3) blocked = true;
+          const tile = {
+            x,
+            y,
+            blocked,
+            slope,
+            rough,
+            cost: 1 + slope * 1.7 + rough * 1.1
+          };
+          row.push(tile);
+          if (blocked) obstacles.push(tile);
+        }
+        grid.push(row);
+      }
+
+      carveRoads(grid, type);
+      if (type === "terrace") applySpiralRoad(grid);
+      return { grid, obstacles };
+    }
+
+    function applySpiralRoad(grid) {
+      // Террасная карта: проходима только дорога и площадки.
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          const c = grid[y][x];
+          c.blocked = true;
+          c.cost = 5.5;
+        }
+      }
+
+      const cx = Math.floor(GRID_W * 0.63);
+      const cy = Math.floor(GRID_H * 0.68);
+      const maxR = Math.min(GRID_W, GRID_H) * 0.46;
+      const minR = 9;
+      const turns = 8.8;
+      const steps = 3800;
+      let prev = null;
+
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const a = turns * Math.PI * 2 * t + Math.PI * 0.02;
+        const r = maxR - t * (maxR - minR);
+        const x = Math.round(cx + Math.cos(a) * r);
+        const y = Math.round(cy + Math.sin(a) * r);
+        if (prev) carveLine(grid, prev.x, prev.y, x, y, 2);
+        prev = { x, y };
+      }
+
+      const access = getTerraceAccessPoints();
+      carveLine(grid, access.top.x, access.top.y, access.entry.x, access.entry.y, 3);
+      carveLine(grid, access.exit.x, access.exit.y, access.bottom.x, access.bottom.y, 3);
+
+      // Добавляем концентрические террасы вокруг дороги.
+      for (let y = 2; y < GRID_H - 2; y++) {
+        for (let x = 2; x < GRID_W - 2; x++) {
+          const dx = x - cx;
+          const dy = y - cy;
+          const r = Math.hypot(dx, dy);
+          if (r > maxR + 1 || r < minR - 2) continue;
+          const c = grid[y][x];
+          if (!c.blocked) continue;
+          const band = Math.floor(r / 4);
+          if (band % 2 === 0 && Math.abs(r - band * 4) < 0.7) {
+            c.blocked = true;
+            c.cost = 8;
+          }
+        }
+      }
+
+      // Немного расширяем полотно, но оставляем его непересекаемым.
+      for (let y = 2; y < GRID_H - 2; y++) {
+        for (let x = 2; x < GRID_W - 2; x++) {
+          if (grid[y][x].blocked) continue;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+              const n = grid[y + dy][x + dx];
+              if (!n.blocked) continue;
+              n.blocked = false;
+              n.cost = 1.15;
+            }
+          }
+        }
+      }
+
+      // Жестко блокируем перемычки между витками, чтобы дорогу нельзя было пересечь напрямую.
+      for (let y = 3; y < GRID_H - 3; y++) {
+        for (let x = 3; x < GRID_W - 3; x++) {
+          if (grid[y][x].blocked) continue;
+          const freeDiag =
+            (!grid[y - 1][x - 1].blocked ? 1 : 0) +
+            (!grid[y - 1][x + 1].blocked ? 1 : 0) +
+            (!grid[y + 1][x - 1].blocked ? 1 : 0) +
+            (!grid[y + 1][x + 1].blocked ? 1 : 0);
+          const freeCross =
+            (!grid[y - 1][x].blocked ? 1 : 0) +
+            (!grid[y + 1][x].blocked ? 1 : 0) +
+            (!grid[y][x - 1].blocked ? 1 : 0) +
+            (!grid[y][x + 1].blocked ? 1 : 0);
+          if (freeDiag >= 3 && freeCross <= 1) {
+            grid[y][x].blocked = true;
+            grid[y][x].cost = 8;
+          }
+        }
+      }
+    }
+
+    function carveRoads(grid, type) {
+      const lines =
+        type === "north"
+          ? [[8, 48, 72, 45], [10, 10, 62, 18], [16, 52, 68, 11]]
+          : type === "deep"
+          ? [[8, 50, 76, 16], [15, 10, 68, 44], [40, 7, 40, 52]]
+          : type === "ridge"
+          ? [[8, 10, 76, 44], [10, 48, 62, 12], [33, 7, 78, 28]]
+          : type === "west"
+          ? [[8, 44, 76, 12], [14, 12, 74, 39], [24, 51, 66, 20]]
+          : type === "south"
+          ? [[8, 11, 66, 21], [14, 35, 78, 49], [16, 52, 58, 16]]
+          : [[9, 9, 39, 11], [39, 11, 74, 16], [74, 16, 72, 50], [15, 11, 72, 50]];
+
+      for (const [x1, y1, x2, y2] of lines) carveLine(grid, x1, y1, x2, y2, 2);
+    }
+
+    function carveLine(grid, x1, y1, x2, y2, radius) {
+      const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / Math.max(steps, 1);
+        const x = Math.round(x1 + (x2 - x1) * t);
+        const y = Math.round(y1 + (y2 - y1) * t);
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const tx = x + dx;
+            const ty = y + dy;
+            if (!inBounds(tx, ty)) continue;
+            const cell = grid[ty][tx];
+            cell.blocked = false;
+            cell.cost = Math.max(0.8, cell.cost - 0.6);
+            cell.rough *= 0.6;
+          }
+        }
+      }
+    }
+
+    const sim = {
+      mapType: "north",
+      map: { grid: [], obstacles: [] },
+      zones: null,
+      truck: {
+        x: 8 * TILE,
+        y: 30 * TILE,
+        angle: -0.2,
+        speed: 0,
+        maxSpeed: 4.2
+      },
+      fuelMax: 180,
+      fuel: 180,
+      route: [],
+      routeRaw: [],
+      targetIndex: 0,
+      aiActive: false,
+      cargoLoaded: false,
+      aiMission: {
+        mode: "idle",
+        completedTrips: 0,
+        cycleStartMs: 0,
+        lastCycleSec: 0
+      },
+      loadMassTons: 0,
+      deliveryFuelStart: null,
+      operation: {
+        active: false,
+        type: "",
+        durationMs: 0,
+        endMs: 0,
+        onDone: null
+      },
+      lidarRays: [],
+      radarPoints: [],
+      telemetry: {
+        sessionStartMs: performance.now(),
+        fuelSamples: [],
+        currentTrip: null,
+        manualIdleSinceMs: null,
+        tripCounter: 0,
+        lastTrip: null,
+        tripLog: []
+      },
+      shift: {
+        startMs: performance.now(),
+        trips: 0,
+        tons: 0,
+        fuelSpentInTrips: 0
+      },
+      visuals: {
+        timeOfDay: "day",
+        weather: "clear"
+      }
+    };
+
+    function inBounds(x, y) {
+      return x >= 0 && y >= 0 && x < GRID_W && y < GRID_H;
+    }
+
+    function worldToTile(wx, wy) {
+      return { x: Math.floor(wx / TILE), y: Math.floor(wy / TILE) };
+    }
+
+    function tileToWorld(tx, ty) {
+      return { x: tx * TILE + TILE * 0.5, y: ty * TILE + TILE * 0.5 };
+    }
+
+    function getZones(type) {
+      if (type === "north") {
+        return {
+          base: { x: 8, y: 49, w: 8, h: 4, name: "База" },
+          load: { x: 18, y: 10, w: 9, h: 5, name: "Погрузка" },
+          unload: { x: 66, y: 44, w: 11, h: 6, name: "Разгрузка" },
+          fuel: { x: 52, y: 13, w: 7, h: 4, name: "АЗС" }
+        };
+      }
+      if (type === "deep") {
+        return {
+          base: { x: 8, y: 50, w: 8, h: 4, name: "База" },
+          load: { x: 32, y: 31, w: 9, h: 5, name: "Погрузка" },
+          unload: { x: 67, y: 14, w: 11, h: 6, name: "Разгрузка" },
+          fuel: { x: 16, y: 10, w: 7, h: 4, name: "АЗС" }
+        };
+      }
+      if (type === "ridge") {
+        return {
+          base: { x: 9, y: 10, w: 8, h: 4, name: "База" },
+          load: { x: 19, y: 38, w: 9, h: 5, name: "Погрузка" },
+          unload: { x: 68, y: 24, w: 11, h: 6, name: "Разгрузка" },
+          fuel: { x: 49, y: 42, w: 7, h: 4, name: "АЗС" }
+        };
+      }
+      if (type === "west") {
+        return {
+          base: { x: 7, y: 46, w: 8, h: 4, name: "База" },
+          load: { x: 15, y: 14, w: 9, h: 5, name: "Погрузка" },
+          unload: { x: 69, y: 18, w: 11, h: 6, name: "Разгрузка" },
+          fuel: { x: 56, y: 40, w: 7, h: 4, name: "АЗС" }
+        };
+      }
+      if (type === "south") {
+        return {
+          base: { x: 8, y: 11, w: 8, h: 4, name: "База" },
+          load: { x: 21, y: 22, w: 9, h: 5, name: "Погрузка" },
+          unload: { x: 70, y: 47, w: 11, h: 6, name: "Разгрузка" },
+          fuel: { x: 58, y: 17, w: 7, h: 4, name: "АЗС" }
+        };
+      }
+      return {
+        // Карта по референсу: разгрузка внизу, остальные зоны наверху.
+        base: { x: 12, y: 6, w: 11, h: 5, name: "База" },
+        load: { x: 36, y: 6, w: 13, h: 6, name: "Погрузка" },
+        fuel: { x: 62, y: 7, w: 9, h: 5, name: "АЗС" },
+        unload: { x: 82, y: 75, w: 16, h: 8, name: "Разгрузка" }
+      };
+    }
+
+    function zoneCenter(zone) {
+      return {
+        x: Math.floor(zone.x + zone.w / 2),
+        y: Math.floor(zone.y + zone.h / 2)
+      };
+    }
+
+    function getTerraceAccessPoints() {
+      return {
+        top: { x: Math.floor(GRID_W * 0.47), y: Math.floor(GRID_H * 0.2) },
+        entry: { x: Math.floor(GRID_W * 0.58), y: Math.floor(GRID_H * 0.27) },
+        exit: { x: Math.floor(GRID_W * 0.78), y: Math.floor(GRID_H * 0.79) },
+        bottom: { x: Math.floor(GRID_W * 0.74), y: Math.floor(GRID_H * 0.9) }
+      };
+    }
+
+    function isInZone(tile, zone) {
+      return tile.x >= zone.x && tile.x < zone.x + zone.w && tile.y >= zone.y && tile.y < zone.y + zone.h;
+    }
+
+    function getCurrentZoneName(tile) {
+      if (!sim.zones) return null;
+      if (isInZone(tile, sim.zones.load)) return "load";
+      if (isInZone(tile, sim.zones.unload)) return "unload";
+      if (isInZone(tile, sim.zones.fuel)) return "fuel";
+      if (isInZone(tile, sim.zones.base)) return "base";
+      return null;
+    }
+
+    function beginOperation(type, seconds, onDone) {
+      sim.truck.speed = 0;
+      sim.aiActive = false;
+      sim.operation.active = true;
+      sim.operation.type = type;
+      sim.operation.durationMs = seconds * 1000;
+      sim.operation.endMs = performance.now() + seconds * 1000;
+      sim.operation.onDone = onDone;
+      statusText.textContent = `Статус: ${type}...`;
+    }
+
+    function updateOperation(now) {
+      if (!sim.operation.active) return;
+      if (now >= sim.operation.endMs) {
+        const done = sim.operation.onDone;
+        sim.operation.active = false;
+        sim.operation.type = "";
+        sim.operation.durationMs = 0;
+        sim.operation.onDone = null;
+        if (done) done();
+      }
+    }
+
+    function setMap(type) {
+      sim.mapType = type;
+      sim.map = generateMap(type);
+      sim.zones = getZones(type);
+      carveZoneRoads();
+      placeTruckSafely();
+      sim.route = [];
+      sim.routeRaw = [];
+      sim.targetIndex = 0;
+      sim.aiActive = false;
+      sim.cargoLoaded = false;
+      sim.loadMassTons = 0;
+      sim.deliveryFuelStart = null;
+      sim.aiMission.mode = "idle";
+      sim.aiMission.completedTrips = 0;
+      sim.aiMission.cycleStartMs = 0;
+      sim.aiMission.lastCycleSec = 0;
+      sim.operation.active = false;
+      sim.shift.startMs = performance.now();
+      sim.shift.trips = 0;
+      sim.shift.tons = 0;
+      sim.shift.fuelSpentInTrips = 0;
+      clickStart = null;
+      finishTrip("Карта изменена");
+      statusText.textContent = "Статус: карта загружена";
+    }
+
+    function carveZoneRoads() {
+      if (!sim.zones) return;
+      for (const zone of Object.values(sim.zones)) {
+        for (let y = zone.y; y < zone.y + zone.h; y++) {
+          for (let x = zone.x; x < zone.x + zone.w; x++) {
+            if (!inBounds(x, y)) continue;
+            const cell = sim.map.grid[y][x];
+            cell.blocked = false;
+            cell.cost = 0.85;
+            cell.rough *= 0.5;
+          }
+        }
+      }
+      const b = zoneCenter(sim.zones.base);
+      const l = zoneCenter(sim.zones.load);
+      const u = zoneCenter(sim.zones.unload);
+      const f = zoneCenter(sim.zones.fuel);
+      carveLine(sim.map.grid, b.x, b.y, l.x, l.y, 2);
+      carveLine(sim.map.grid, l.x, l.y, f.x, f.y, 2);
+      carveLine(sim.map.grid, f.x, f.y, b.x, b.y, 2);
+      if (sim.mapType === "terrace") {
+        const access = getTerraceAccessPoints();
+        carveLine(sim.map.grid, f.x, f.y, access.top.x, access.top.y, 3);
+        carveLine(sim.map.grid, l.x, l.y, access.top.x, access.top.y, 3);
+        carveLine(sim.map.grid, b.x, b.y, l.x, l.y, 3);
+        carveLine(sim.map.grid, access.bottom.x, access.bottom.y, u.x, u.y, 3);
+      } else {
+        carveLine(sim.map.grid, l.x, l.y, u.x, u.y, 2);
+        carveLine(sim.map.grid, u.x, u.y, f.x, f.y, 2);
+      }
+    }
+
+    function placeTruckSafely() {
+      if (sim.zones && sim.zones.base) {
+        const base = zoneCenter(sim.zones.base);
+        const w = tileToWorld(base.x, base.y);
+        sim.truck.x = w.x;
+        sim.truck.y = w.y;
+        sim.truck.speed = 0;
+        sim.truck.angle = -0.2;
+        return;
+      }
+      for (let y = GRID_H - 4; y >= 4; y--) {
+        for (let x = 4; x < GRID_W - 4; x++) {
+          if (!sim.map.grid[y][x].blocked) {
+            const w = tileToWorld(x, y);
+            sim.truck.x = w.x;
+            sim.truck.y = w.y;
+            sim.truck.speed = 0;
+            sim.truck.angle = -0.4;
+            return;
+          }
+        }
+      }
+    }
+
+    function heuristic(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function key(x, y) {
+      return `${x},${y}`;
+    }
+
+    function nearestOpenTile(tile, maxRadius = 14) {
+      if (inBounds(tile.x, tile.y) && !sim.map.grid[tile.y][tile.x].blocked) return tile;
+      for (let r = 1; r <= maxRadius; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+          for (let dx = -r; dx <= r; dx++) {
+            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+            const x = tile.x + dx;
+            const y = tile.y + dy;
+            if (!inBounds(x, y)) continue;
+            if (!sim.map.grid[y][x].blocked) return { x, y };
+          }
+        }
+      }
+      return null;
+    }
+
+    function findPath(start, goal) {
+      const resolvedStart = nearestOpenTile(start, 18);
+      const resolvedGoal = nearestOpenTile(goal, 18);
+      if (!resolvedStart || !resolvedGoal) return [];
+
+      const open = [resolvedStart];
+      const closed = new Set();
+      const came = new Map();
+      const g = new Map();
+      const f = new Map();
+      g.set(key(resolvedStart.x, resolvedStart.y), 0);
+      f.set(key(resolvedStart.x, resolvedStart.y), heuristic(resolvedStart, resolvedGoal));
+
+      while (open.length > 0) {
+        open.sort((a, b) => (f.get(key(a.x, a.y)) ?? Infinity) - (f.get(key(b.x, b.y)) ?? Infinity));
+        const current = open.shift();
+        const ck = key(current.x, current.y);
+        if (closed.has(ck)) continue;
+        closed.add(ck);
+        if (current.x === resolvedGoal.x && current.y === resolvedGoal.y) return reconstructPath(came, current);
+
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = current.x + dx;
+            const ny = current.y + dy;
+            if (!inBounds(nx, ny)) continue;
+            const cell = sim.map.grid[ny][nx];
+            if (cell.blocked) continue;
+            if (closed.has(key(nx, ny))) continue;
+            if (dx !== 0 && dy !== 0) {
+              const sideA = sim.map.grid[current.y][nx];
+              const sideB = sim.map.grid[ny][current.x];
+              if (sideA.blocked || sideB.blocked) continue;
+            }
+            const step = dx !== 0 && dy !== 0 ? 1.4 : 1;
+            const tentative = (g.get(key(current.x, current.y)) ?? Infinity) + cell.cost * step;
+            const nk = key(nx, ny);
+            if (tentative < (g.get(nk) ?? Infinity)) {
+              came.set(nk, current);
+              g.set(nk, tentative);
+              f.set(nk, tentative + heuristic({ x: nx, y: ny }, resolvedGoal));
+              if (!open.some((n) => n.x === nx && n.y === ny)) open.push({ x: nx, y: ny });
+            }
+          }
+        }
+      }
+      return [];
+    }
+
+    function reconstructPath(came, current) {
+      const path = [current];
+      while (came.has(key(current.x, current.y))) {
+        current = came.get(key(current.x, current.y));
+        path.push(current);
+      }
+      return path.reverse();
+    }
+
+    function smoothPath(path) {
+      if (path.length < 3) return path;
+      const out = [path[0]];
+      for (let i = 1; i < path.length - 1; i++) {
+        const a = out[out.length - 1];
+        const b = path[i];
+        const c = path[i + 1];
+        const abx = b.x - a.x;
+        const aby = b.y - a.y;
+        const bcx = c.x - b.x;
+        const bcy = c.y - b.y;
+        if (abx === bcx && aby === bcy) continue;
+        out.push(b);
+      }
+      out.push(path[path.length - 1]);
+      return out;
+    }
+
+    function setMode(next) {
+      mode = next;
+      manualBtn.classList.toggle("active", next === "manual");
+      aiBtn.classList.toggle("active", next === "ai");
+      if (next === "manual") {
+        sim.aiActive = false;
+        sim.aiMission.mode = "idle";
+        statusText.textContent = "Статус: ручное управление";
+      } else {
+        beginAutoMission();
+        statusText.textContent = "Статус: ИИ выполняет рейсы";
+      }
+    }
+
+    function planRoute(startTile, endTile, tripType = "ИИ рейс") {
+      if (!inBounds(startTile.x, startTile.y) || !inBounds(endTile.x, endTile.y)) return;
+      const s = nearestOpenTile(startTile, 18);
+      const e = nearestOpenTile(endTile, 18);
+      if (!s || !e) {
+        statusText.textContent = "Статус: старт/цель недоступны";
+        return;
+      }
+      const raw = findPath(s, e);
+      if (raw.length === 0) {
+        statusText.textContent = "Статус: путь не найден";
+        return;
+      }
+      const smooth = smoothPath(raw).map((t) => tileToWorld(t.x, t.y));
+      sim.routeRaw = raw.map((t) => tileToWorld(t.x, t.y));
+      sim.route = smooth;
+      sim.targetIndex = 0;
+      sim.aiActive = true;
+      if (!sim.telemetry.currentTrip) startTrip(tripType);
+      statusText.textContent = `Статус: маршрут построен (${smooth.length} точек)`;
+    }
+
+    function beginAutoMission() {
+      if (!sim.zones) return;
+      sim.cargoLoaded = false;
+      sim.loadMassTons = 0;
+      sim.deliveryFuelStart = null;
+      sim.route = [];
+      sim.routeRaw = [];
+      sim.aiActive = false;
+      sim.aiMission.mode = "toLoad";
+      sim.aiMission.cycleStartMs = performance.now();
+      const base = zoneCenter(sim.zones.base);
+      const p = tileToWorld(base.x, base.y);
+      sim.truck.x = p.x;
+      sim.truck.y = p.y;
+      sim.truck.speed = 0;
+      statusText.textContent = "Статус: ИИ цикл запущен (к погрузке)";
+    }
+
+    function queueAiRoute() {
+      if (!sim.zones || mode !== "ai" || sim.operation.active) return;
+      // Маршруты строим только для "дорожных" состояний.
+      if (!["toLoad", "toUnload", "toFuel"].includes(sim.aiMission.mode)) return;
+      if (sim.aiMission.mode === "toLoad" && !sim.cargoLoaded && sim.fuel <= sim.fuelMax * 0.2) {
+        sim.aiMission.mode = "toFuel";
+      }
+      const start = worldToTile(sim.truck.x, sim.truck.y);
+      let target = zoneCenter(sim.zones.load);
+      let name = "База -> Погрузка";
+
+      if (sim.aiMission.mode === "toUnload") {
+        target = zoneCenter(sim.zones.unload);
+        name = "Погрузка -> Разгрузка";
+      } else if (sim.aiMission.mode === "toFuel") {
+        target = zoneCenter(sim.zones.fuel);
+        name = "К АЗС";
+      } else if (sim.aiMission.mode === "toLoad") {
+        target = zoneCenter(sim.zones.load);
+        name = "К погрузке";
+      }
+
+      const startOpen = nearestOpenTile(start, 20);
+      const targetOpen = nearestOpenTile(target, 20);
+      if (!startOpen || !targetOpen) {
+        statusText.textContent = "Статус: путь к зоне временно недоступен";
+        return;
+      }
+      if (startOpen.x === targetOpen.x && startOpen.y === targetOpen.y) return;
+      planRoute(startOpen, targetOpen, name);
+    }
+
+    function onAiArrival() {
+      if (sim.aiMission.mode === "toLoad") {
+        sim.aiMission.mode = "loading";
+        beginOperation("Погрузка", 3, () => {
+          sim.cargoLoaded = true;
+          sim.loadMassTons = 110 + Math.random() * 30;
+          sim.deliveryFuelStart = sim.fuel;
+          sim.aiMission.mode = "toUnload";
+          statusText.textContent = "Статус: погрузка завершена";
+        });
+      } else if (sim.aiMission.mode === "toUnload") {
+        sim.aiMission.mode = "unloading";
+        beginOperation("Разгрузка", 3, () => {
+          const deliveredTons = sim.loadMassTons;
+          sim.cargoLoaded = false;
+          sim.loadMassTons = 0;
+          sim.aiMission.completedTrips++;
+          sim.shift.trips++;
+          sim.shift.tons += deliveredTons;
+          if (sim.deliveryFuelStart !== null) {
+            sim.shift.fuelSpentInTrips += Math.max(0, sim.deliveryFuelStart - sim.fuel);
+          }
+          sim.deliveryFuelStart = null;
+          if (sim.aiMission.cycleStartMs > 0) {
+            sim.aiMission.lastCycleSec = (performance.now() - sim.aiMission.cycleStartMs) / 1000;
+          }
+          if (sim.fuel <= sim.fuelMax * 0.2) {
+            sim.aiMission.mode = "toFuel";
+            statusText.textContent = "Статус: топливо ниже 20%, едем на АЗС";
+          } else {
+            sim.aiMission.mode = "toLoad";
+            sim.aiMission.cycleStartMs = performance.now();
+            statusText.textContent = "Статус: разгрузка завершена, новый рейс";
+          }
+        });
+      } else if (sim.aiMission.mode === "toFuel") {
+        sim.aiMission.mode = "fueling";
+        beginOperation("Заправка", 4, () => {
+          sim.fuel = sim.fuelMax;
+          sim.aiMission.mode = "toLoad";
+          sim.aiMission.cycleStartMs = performance.now();
+          statusText.textContent = "Статус: заправка завершена, новый рейс";
+        });
+      } else {
+        return;
+      }
+      sim.route = [];
+      sim.routeRaw = [];
+      sim.aiActive = false;
+    }
+
+    function updateManual(dt) {
+      if (sim.operation.active) return;
+      const up = keys["w"] || keys["ц"] || keys["arrowup"];
+      const down = keys["s"] || keys["ы"] || keys["arrowdown"];
+      const left = keys["a"] || keys["ф"] || keys["arrowleft"];
+      const right = keys["d"] || keys["в"] || keys["arrowright"];
+      const acc = (up ? 1 : 0) - (down ? 1 : 0);
+      const steer = (right ? 1 : 0) - (left ? 1 : 0);
+      const now = performance.now();
+      if ((acc !== 0 || Math.abs(sim.truck.speed) > 0.4) && !sim.telemetry.currentTrip) {
+        startTrip("Ручной рейс");
+      }
+      sim.truck.speed += acc * 5.2 * dt;
+      sim.truck.speed *= 0.985;
+      sim.truck.speed = Math.max(-2, Math.min(sim.truck.maxSpeed, sim.truck.speed));
+      sim.truck.angle += steer * (0.9 + Math.abs(sim.truck.speed) * 0.08) * dt;
+      moveTruck(dt);
+      if (sim.telemetry.currentTrip && Math.abs(sim.truck.speed) < 0.12 && acc === 0) {
+        if (!sim.telemetry.manualIdleSinceMs) sim.telemetry.manualIdleSinceMs = now;
+        if (now - sim.telemetry.manualIdleSinceMs > 2500) finishTrip("Ручной рейс завершен");
+      } else {
+        sim.telemetry.manualIdleSinceMs = null;
+      }
+    }
+
+    function updateAI(dt) {
+      if (sim.operation.active) return;
+      const zoneNow = getCurrentZoneName(worldToTile(sim.truck.x, sim.truck.y));
+      if (sim.aiMission.mode === "toLoad" && zoneNow === "load") {
+        onAiArrival();
+        return;
+      }
+      if (sim.aiMission.mode === "toUnload" && zoneNow === "unload") {
+        onAiArrival();
+        return;
+      }
+      if (sim.aiMission.mode === "toFuel" && zoneNow === "fuel") {
+        onAiArrival();
+        return;
+      }
+      if ((!sim.aiActive || sim.route.length === 0) && mode === "ai") {
+        queueAiRoute();
+      }
+      if (!sim.aiActive || sim.route.length === 0) {
+        return;
+      }
+      const target = sim.route[Math.min(sim.targetIndex, sim.route.length - 1)];
+      const dx = target.x - sim.truck.x;
+      const dy = target.y - sim.truck.y;
+      const desired = Math.atan2(dy, dx);
+      const stepAngle = Math.PI / 4;
+      const snapped = Math.round(desired / stepAngle) * stepAngle;
+      sim.truck.angle = snapped;
+      const dist = Math.hypot(dx, dy);
+      const desiredSpeed = Math.max(0.45, Math.min(1.8, dist / 24));
+      sim.truck.speed += (desiredSpeed - sim.truck.speed) * 2.2 * dt;
+      moveTruck(dt);
+
+      const routeDeviation = getRouteDeviation();
+      if (routeDeviation > 55) {
+        const from = worldToTile(sim.truck.x, sim.truck.y);
+        const to = worldToTile(target.x, target.y);
+        planRoute(from, to, "Коррекция маршрута");
+        return;
+      }
+
+      if (dist < 10) {
+        sim.truck.x = target.x;
+        sim.truck.y = target.y;
+        sim.truck.speed *= 0.25;
+        sim.targetIndex++;
+        if (sim.targetIndex >= sim.route.length) {
+          sim.aiActive = false;
+          sim.route = [];
+          sim.routeRaw = [];
+          sim.truck.speed *= 0.35;
+          finishTrip("Переход к зоне");
+        }
+      }
+    }
+
+    function moveTruck(dt) {
+      const prevX = sim.truck.x;
+      const prevY = sim.truck.y;
+      const nx = sim.truck.x + Math.cos(sim.truck.angle) * sim.truck.speed * 35 * dt;
+      const ny = sim.truck.y + Math.sin(sim.truck.angle) * sim.truck.speed * 35 * dt;
+      const t = worldToTile(nx, ny);
+      if (inBounds(t.x, t.y) && !sim.map.grid[t.y][t.x].blocked) {
+        sim.truck.x = nx;
+        sim.truck.y = ny;
+        const moved = Math.hypot(sim.truck.x - prevX, sim.truck.y - prevY);
+        if (Math.abs(sim.truck.speed) > 0.08 && moved > 0.1) {
+          const cell = sim.map.grid[t.y][t.x];
+          const usage = (0.002 + Math.abs(sim.truck.speed) * 0.01 + cell.cost * 0.003) * (dt * 60);
+          sim.fuel = Math.max(0, sim.fuel - usage);
+        }
+      } else {
+        sim.truck.speed *= -0.15;
+      }
+      if (sim.fuel <= 0.05) {
+        sim.truck.speed = 0;
+        sim.aiActive = false;
+        sim.aiMission.mode = "idle";
+        finishTrip("Топливо закончилось");
+        statusText.textContent = "Статус: топливо закончилось";
+      }
+    }
+
+    function formatDuration(seconds) {
+      const s = Math.max(0, Math.round(seconds));
+      const mm = Math.floor(s / 60);
+      const ss = s % 60;
+      return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
+
+    function formatShiftDuration(seconds) {
+      const s = Math.max(0, Math.round(seconds));
+      const hh = Math.floor(s / 3600);
+      const mm = Math.floor((s % 3600) / 60);
+      const ss = s % 60;
+      return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+    }
+
+    function startTrip(type) {
+      if (sim.telemetry.currentTrip) finishTrip("Переключение рейса");
+      const now = performance.now();
+      sim.telemetry.tripCounter += 1;
+      sim.telemetry.manualIdleSinceMs = null;
+      sim.telemetry.currentTrip = {
+        id: sim.telemetry.tripCounter,
+        type,
+        startMs: now,
+        startFuel: sim.fuel
+      };
+    }
+
+    function finishTrip(reason) {
+      const current = sim.telemetry.currentTrip;
+      if (!current) return;
+      const endMs = performance.now();
+      const spent = Math.max(0, current.startFuel - sim.fuel);
+      const durationSec = (endMs - current.startMs) / 1000;
+      const entry = {
+        id: current.id,
+        type: current.type,
+        spent,
+        durationSec,
+        reason
+      };
+      sim.telemetry.lastTrip = entry;
+      sim.telemetry.tripLog.unshift(entry);
+      sim.telemetry.tripLog = sim.telemetry.tripLog.slice(0, 6);
+      sim.telemetry.currentTrip = null;
+      sim.telemetry.manualIdleSinceMs = null;
+    }
+
+    function updateTelemetry(now) {
+      const t = sim.telemetry;
+      const seconds = (now - t.sessionStartMs) / 1000;
+      const last = t.fuelSamples[t.fuelSamples.length - 1];
+      if (!last || seconds - last.timeSec >= 1) {
+        t.fuelSamples.push({ timeSec: seconds, fuel: sim.fuel });
+      }
+
+      const keepWindow = 360;
+      t.fuelSamples = t.fuelSamples.filter((s) => seconds - s.timeSec <= keepWindow);
+    }
+
+    function getRouteDeviation() {
+      if (sim.route.length === 0) return 0;
+      let best = Infinity;
+      for (const p of sim.route) {
+        const d = Math.hypot(sim.truck.x - p.x, sim.truck.y - p.y);
+        if (d < best) best = d;
+      }
+      return best;
+    }
+
+    function castSensors() {
+      const rays = [];
+      const radarPts = [];
+      const maxDist = 190;
+      const ox = sim.truck.x;
+      const oy = sim.truck.y;
+
+      for (let i = 0; i < 72; i++) {
+        const a = (i / 72) * Math.PI * 2;
+        let hitDist = maxDist;
+        for (let d = 6; d <= maxDist; d += 4) {
+          const rx = ox + Math.cos(a) * d;
+          const ry = oy + Math.sin(a) * d;
+          const t = worldToTile(rx, ry);
+          if (!inBounds(t.x, t.y) || sim.map.grid[t.y][t.x].blocked) {
+            hitDist = d;
+            radarPts.push({ angle: a, dist: d });
+            break;
+          }
+        }
+        rays.push({ angle: a, dist: hitDist });
+      }
+
+      sim.lidarRays = rays;
+      sim.radarPoints = radarPts;
+    }
+
+    function drawWorld() {
+      ctx.clearRect(0, 0, simCanvas.width, simCanvas.height);
+
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          const c = sim.map.grid[y][x];
+          const px = x * TILE;
+          const py = y * TILE;
+          if (sim.mapType === "terrace") {
+            const cx = GRID_W * 0.63;
+            const cy = GRID_H * 0.68;
+            const rDist = Math.hypot(x - cx, y - cy);
+            const terraceBand = Math.floor(rDist / 3.6);
+            if (c.blocked) {
+              const s = 66 + (terraceBand % 2) * 10;
+              ctx.fillStyle = `rgb(${s + 22}, ${s + 15}, ${s + 8})`;
+            } else {
+              const roadShade = 118 + (terraceBand % 2) * 8;
+              ctx.fillStyle = `rgb(${roadShade + 20}, ${roadShade + 10}, ${roadShade - 4})`;
+            }
+          } else if (c.blocked) {
+            const r = Math.floor(135 + c.rough * 80);
+            const g = Math.floor(34 + c.rough * 20);
+            const b = Math.floor(34 + c.rough * 20);
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          } else {
+            const h = Math.floor(72 + c.slope * 22 + c.rough * 18);
+            const r = h + 22;
+            const g = h + 8;
+            const b = h - 4;
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          }
+          ctx.fillRect(px, py, TILE, TILE);
+        }
+      }
+
+      if (sim.mapType === "terrace") drawTerraceContours();
+      drawZones();
+
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= GRID_W; x++) {
+        ctx.beginPath();
+        ctx.moveTo(x * TILE, 0);
+        ctx.lineTo(x * TILE, GRID_H * TILE);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= GRID_H; y++) {
+        ctx.beginPath();
+        ctx.moveTo(0, y * TILE);
+        ctx.lineTo(GRID_W * TILE, y * TILE);
+        ctx.stroke();
+      }
+
+      if (sim.routeRaw.length > 1) {
+        ctx.strokeStyle = "rgba(64, 178, 255, 0.35)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sim.routeRaw[0].x, sim.routeRaw[0].y);
+        for (let i = 1; i < sim.routeRaw.length; i++) ctx.lineTo(sim.routeRaw[i].x, sim.routeRaw[i].y);
+        ctx.stroke();
+      }
+
+      if (sim.route.length > 1) {
+        ctx.strokeStyle = "rgba(255, 167, 38, 0.95)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(sim.route[0].x, sim.route[0].y);
+        for (let i = 1; i < sim.route.length; i++) ctx.lineTo(sim.route[i].x, sim.route[i].y);
+        ctx.stroke();
+      }
+
+      drawTruck();
+      drawWeatherOverlay();
+      drawTimeOverlay();
+    }
+
+    function drawTerraceContours() {
+      const cx = GRID_W * 0.63 * TILE;
+      const cy = GRID_H * 0.68 * TILE;
+      const maxR = Math.min(GRID_W, GRID_H) * 0.46 * TILE;
+      ctx.strokeStyle = "rgba(210, 190, 165, 0.18)";
+      ctx.lineWidth = 2;
+      for (let r = maxR; r > 120; r -= 70) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(46,78,50,0.25)";
+      ctx.fillRect(0, 0, GRID_W * TILE, Math.floor(GRID_H * 0.16) * TILE);
+    }
+
+    function drawWeatherOverlay() {
+      const w = GRID_W * TILE;
+      const h = GRID_H * TILE;
+      const now = performance.now();
+      if (sim.visuals.weather === "fog") {
+        ctx.fillStyle = "rgba(210,220,225,0.14)";
+        ctx.fillRect(0, 0, w, h);
+      } else if (sim.visuals.weather === "dust") {
+        ctx.fillStyle = "rgba(190,150,105,0.12)";
+        ctx.fillRect(0, 0, w, h);
+      } else if (sim.visuals.weather === "rain") {
+        ctx.strokeStyle = "rgba(170,210,255,0.25)";
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 220; i++) {
+          const x = (i * 53 + now * 0.2) % w;
+          const y = (i * 37 + now * 0.9) % h;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x - 4, y + 11);
+          ctx.stroke();
+        }
+      }
+    }
+
+    function drawTimeOverlay() {
+      const w = GRID_W * TILE;
+      const h = GRID_H * TILE;
+      if (sim.visuals.timeOfDay === "day") return;
+      if (sim.visuals.timeOfDay === "dusk") {
+        ctx.fillStyle = "rgba(255,140,70,0.12)";
+        ctx.fillRect(0, 0, w, h);
+        return;
+      }
+      ctx.fillStyle = "rgba(8,16,34,0.4)";
+      ctx.fillRect(0, 0, w, h);
+      const hx = sim.truck.x + Math.cos(sim.truck.angle) * 110;
+      const hy = sim.truck.y + Math.sin(sim.truck.angle) * 110;
+      const grad = ctx.createRadialGradient(hx, hy, 10, hx, hy, 190);
+      grad.addColorStop(0, "rgba(255,245,200,0.45)");
+      grad.addColorStop(1, "rgba(255,245,200,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 190, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawZones() {
+      if (!sim.zones) return;
+      const drawOne = (zone, color) => {
+        const px = zone.x * TILE;
+        const py = zone.y * TILE;
+        const w = zone.w * TILE;
+        const h = zone.h * TILE;
+        ctx.fillStyle = color.fill;
+        ctx.fillRect(px, py, w, h);
+        ctx.strokeStyle = color.stroke;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px + 1, py + 1, w - 2, h - 2);
+        ctx.fillStyle = "#f2f5f8";
+        ctx.font = "12px Segoe UI";
+        ctx.fillText(zone.name, px + 4, py + 14);
+      };
+
+      drawOne(sim.zones.base, { fill: "rgba(80,170,230,0.25)", stroke: "rgba(100,210,255,0.95)" });
+      drawOne(sim.zones.load, { fill: "rgba(90,190,100,0.25)", stroke: "rgba(130,230,130,0.95)" });
+      drawOne(sim.zones.unload, { fill: "rgba(240,170,60,0.24)", stroke: "rgba(255,200,90,0.95)" });
+      drawOne(sim.zones.fuel, { fill: "rgba(210,90,90,0.22)", stroke: "rgba(255,130,130,0.95)" });
+    }
+
+    function drawTruck() {
+      const x = sim.truck.x;
+      const y = sim.truck.y;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(sim.truck.angle);
+
+      ctx.fillStyle = "#f3a73b";
+      ctx.fillRect(-14, -9, 28, 18);
+      ctx.fillStyle = "#d48d2f";
+      ctx.fillRect(-6, -13, 18, 8);
+      ctx.fillStyle = "#303845";
+      ctx.fillRect(-12, -7, 7, 5);
+      ctx.fillRect(5, -7, 7, 5);
+      ctx.fillRect(-12, 2, 7, 5);
+      ctx.fillRect(5, 2, 7, 5);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(10, 0);
+      ctx.lineTo(18, 0);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff3";
+      ctx.fill();
+
+      if (sim.operation.active) {
+        const left = Math.max(0, sim.operation.endMs - performance.now());
+        const duration = Math.max(1, sim.operation.durationMs);
+        const progress = 1 - left / duration;
+        ctx.strokeStyle = "rgba(255,220,120,0.9)";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(x, y, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, progress)));
+        ctx.stroke();
+      }
+    }
+
+    function drawLidar() {
+      lidarCtx.clearRect(0, 0, lidarCanvas.width, lidarCanvas.height);
+      const cx = lidarCanvas.width * 0.5;
+      const cy = lidarCanvas.height * 0.7;
+      const radius = 75;
+
+      lidarCtx.strokeStyle = "rgba(255,255,255,0.12)";
+      for (let r = 20; r <= radius; r += 18) {
+        lidarCtx.beginPath();
+        lidarCtx.arc(cx, cy, r, Math.PI, 0);
+        lidarCtx.stroke();
+      }
+
+      for (const ray of sim.lidarRays) {
+        const dNorm = Math.min(1, ray.dist / 190);
+        const a = ray.angle;
+        const px = cx + Math.cos(a) * dNorm * radius;
+        const py = cy - Math.abs(Math.sin(a)) * dNorm * radius;
+        const danger = 1 - dNorm;
+        lidarCtx.strokeStyle = `rgba(${180 + danger * 70}, ${240 - danger * 160}, 80, 0.85)`;
+        lidarCtx.beginPath();
+        lidarCtx.moveTo(cx, cy);
+        lidarCtx.lineTo(px, py);
+        lidarCtx.stroke();
+      }
+      lidarCtx.fillStyle = "#ffd082";
+      lidarCtx.beginPath();
+      lidarCtx.arc(cx, cy, 4, 0, Math.PI * 2);
+      lidarCtx.fill();
+    }
+
+    function drawRadar() {
+      radarCtx.clearRect(0, 0, radarCanvas.width, radarCanvas.height);
+      const cx = radarCanvas.width / 2;
+      const cy = radarCanvas.height / 2;
+      const r = 90;
+
+      radarCtx.strokeStyle = "rgba(65, 181, 255, 0.18)";
+      for (let i = 1; i <= 4; i++) {
+        radarCtx.beginPath();
+        radarCtx.arc(cx, cy, (r * i) / 4, 0, Math.PI * 2);
+        radarCtx.stroke();
+      }
+      radarCtx.beginPath();
+      radarCtx.moveTo(cx - r, cy);
+      radarCtx.lineTo(cx + r, cy);
+      radarCtx.moveTo(cx, cy - r);
+      radarCtx.lineTo(cx, cy + r);
+      radarCtx.stroke();
+
+      radarCtx.fillStyle = "rgba(0, 255, 170, 0.7)";
+      for (const pt of sim.radarPoints) {
+        const d = Math.min(1, pt.dist / 190);
+        const px = cx + Math.cos(pt.angle) * d * r;
+        const py = cy + Math.sin(pt.angle) * d * r;
+        radarCtx.beginPath();
+        radarCtx.arc(px, py, 2.2, 0, Math.PI * 2);
+        radarCtx.fill();
+      }
+
+      radarCtx.fillStyle = "#ffd082";
+      radarCtx.beginPath();
+      radarCtx.arc(cx, cy, 4, 0, Math.PI * 2);
+      radarCtx.fill();
+    }
+
+    function drawMiniMap() {
+      miniMapCtx.clearRect(0, 0, miniMapCanvas.width, miniMapCanvas.height);
+      const sx = miniMapCanvas.width / (GRID_W * TILE);
+      const sy = miniMapCanvas.height / (GRID_H * TILE);
+
+      miniMapCtx.fillStyle = "#121923";
+      miniMapCtx.fillRect(0, 0, miniMapCanvas.width, miniMapCanvas.height);
+
+      for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+          if (!sim.map.grid[y][x].blocked) continue;
+          miniMapCtx.fillStyle = "rgba(255,60,60,0.8)";
+          miniMapCtx.fillRect(x * TILE * sx, y * TILE * sy, TILE * sx, TILE * sy);
+        }
+      }
+
+      if (sim.route.length > 1) {
+        miniMapCtx.strokeStyle = "rgba(255,170,45,0.95)";
+        miniMapCtx.lineWidth = 2;
+        miniMapCtx.beginPath();
+        miniMapCtx.moveTo(sim.route[0].x * sx, sim.route[0].y * sy);
+        for (let i = 1; i < sim.route.length; i++) miniMapCtx.lineTo(sim.route[i].x * sx, sim.route[i].y * sy);
+        miniMapCtx.stroke();
+      }
+
+      const tx = sim.truck.x * sx;
+      const ty = sim.truck.y * sy;
+      miniMapCtx.fillStyle = "#8ef6ff";
+      miniMapCtx.beginPath();
+      miniMapCtx.arc(tx, ty, 4, 0, Math.PI * 2);
+      miniMapCtx.fill();
+    }
+
+    function updateUi() {
+      const f = Math.max(0, sim.fuel);
+      const fp = (f / sim.fuelMax) * 100;
+      fuelText.textContent = `${f.toFixed(1)} л (${fp.toFixed(1)}%)`;
+      fuelBar.style.width = `${Math.max(0, Math.min(100, fp))}%`;
+      cargoText.textContent = `Груз: ${sim.cargoLoaded ? "загружен" : "пусто"} (${sim.loadMassTons.toFixed(1)} т) | ИИ рейсов: ${sim.aiMission.completedTrips}`;
+      opText.textContent = sim.operation.active ? `Операция: ${sim.operation.type}` : "Операция: нет";
+      cycleText.textContent = `Цикл рейса: ${formatDuration(sim.aiMission.lastCycleSec)}`;
+      if (fp > 60) fuelBar.style.background = "var(--good)";
+      else if (fp > 25) fuelBar.style.background = "#ffb74d";
+      else fuelBar.style.background = "var(--warn)";
+
+      const totalSpent = Math.max(0, sim.fuelMax - sim.fuel);
+      totalSpentText.textContent = `${((totalSpent / sim.fuelMax) * 100).toFixed(2)}%`;
+
+      const periodSec = Number(periodSelect.value);
+      const samples = sim.telemetry.fuelSamples;
+      const latest = samples[samples.length - 1];
+      if (latest) {
+        const fromTime = latest.timeSec - periodSec;
+        let startSample = samples[0];
+        for (let i = samples.length - 1; i >= 0; i--) {
+          if (samples[i].timeSec <= fromTime) {
+            startSample = samples[i];
+            break;
+          }
+        }
+        const periodSpent = Math.max(0, startSample.fuel - latest.fuel);
+        periodSpentText.textContent = `${((periodSpent / sim.fuelMax) * 100).toFixed(2)}%`;
+      }
+
+      const currentTrip = sim.telemetry.currentTrip;
+      if (currentTrip) {
+        const durationSec = (performance.now() - currentTrip.startMs) / 1000;
+        const spent = Math.max(0, currentTrip.startFuel - sim.fuel);
+        currentTripText.textContent = `рейс #${currentTrip.id} (${currentTrip.type}) - ${spent.toFixed(2)}%, ${formatDuration(durationSec)}`;
+      } else {
+        currentTripText.textContent = "не активен";
+      }
+
+      const lastTrip = sim.telemetry.lastTrip;
+      if (lastTrip) {
+        lastTripText.textContent = `#${lastTrip.id} ${lastTrip.type}: ${lastTrip.spent.toFixed(2)}%, ${formatDuration(lastTrip.durationSec)} (${lastTrip.reason})`;
+      } else {
+        lastTripText.textContent = "нет данных";
+      }
+
+      if (sim.telemetry.tripLog.length === 0) {
+        tripLogText.textContent = "пока пусто";
+      } else {
+        tripLogText.innerHTML = sim.telemetry.tripLog
+          .map((trip) => `#${trip.id} ${trip.type}: ${trip.spent.toFixed(2)}%, ${formatDuration(trip.durationSec)} (${trip.reason})`)
+          .join("<br>");
+      }
+
+      const shiftSeconds = (performance.now() - sim.shift.startMs) / 1000;
+      const shiftTrips = sim.shift.trips;
+      const avgFuel = shiftTrips > 0 ? sim.shift.fuelSpentInTrips / shiftTrips : 0;
+      const avgTons = shiftTrips > 0 ? sim.shift.tons / shiftTrips : 0;
+      const tonsPerHour = shiftSeconds > 0 ? (sim.shift.tons / shiftSeconds) * 3600 : 0;
+      shiftTimeText.textContent = `Время смены: ${formatShiftDuration(shiftSeconds)}`;
+      shiftTripsText.textContent = `Рейсы: ${shiftTrips}`;
+      shiftTonsText.textContent = `Тоннаж: ${sim.shift.tons.toFixed(1)} т`;
+      shiftAvgFuelText.textContent = `Средний расход/рейс: ${avgFuel.toFixed(2)}%`;
+      shiftAvgTonsText.textContent = `Средний тоннаж/рейс: ${avgTons.toFixed(1)} т`;
+      shiftRateText.textContent = `Производительность: ${tonsPerHour.toFixed(1)} т/ч`;
+    }
+
+    function handleMapClick(ev) {
+      if (mode !== "ai") return;
+      statusText.textContent = "Статус: ИИ идет по заданному маршруту зон";
+    }
+
+    function tryManualZoneAction() {
+      if (mode !== "manual" || !sim.zones || sim.operation.active) return;
+      const tile = worldToTile(sim.truck.x, sim.truck.y);
+      if (isInZone(tile, sim.zones.load) && !sim.cargoLoaded) {
+        beginOperation("Погрузка (ручн.)", 3, () => {
+          sim.cargoLoaded = true;
+          sim.loadMassTons = 95 + Math.random() * 40;
+          sim.deliveryFuelStart = sim.fuel;
+          statusText.textContent = "Статус: ручная погрузка завершена";
+        });
+      } else if (isInZone(tile, sim.zones.unload) && sim.cargoLoaded) {
+        beginOperation("Разгрузка (ручн.)", 3, () => {
+          const deliveredTons = sim.loadMassTons;
+          sim.cargoLoaded = false;
+          sim.loadMassTons = 0;
+          sim.shift.trips++;
+          sim.shift.tons += deliveredTons;
+          if (sim.deliveryFuelStart !== null) {
+            sim.shift.fuelSpentInTrips += Math.max(0, sim.deliveryFuelStart - sim.fuel);
+          }
+          sim.deliveryFuelStart = null;
+          statusText.textContent = "Статус: ручная разгрузка завершена";
+        });
+      } else if (isInZone(tile, sim.zones.fuel)) {
+        beginOperation("Заправка (ручн.)", 4, () => {
+          sim.fuel = sim.fuelMax;
+          statusText.textContent = "Статус: ручная заправка завершена";
+        });
+      } else {
+        statusText.textContent = "Статус: въедьте в зону погрузки/разгрузки/АЗС";
+      }
+    }
+
+    function resetScenario() {
+      finishTrip("Сброс");
+      sim.fuel = sim.fuelMax;
+      sim.telemetry.sessionStartMs = performance.now();
+      sim.telemetry.fuelSamples = [];
+      sim.telemetry.currentTrip = null;
+      sim.telemetry.manualIdleSinceMs = null;
+      sim.telemetry.tripCounter = 0;
+      sim.telemetry.lastTrip = null;
+      sim.telemetry.tripLog = [];
+      setMap(mapSelect.value);
+    }
+
+    function exportShiftCsv() {
+      const lines = [
+        "metric,value",
+        `shift_time_seconds,${((performance.now() - sim.shift.startMs) / 1000).toFixed(1)}`,
+        `trips,${sim.shift.trips}`,
+        `tons,${sim.shift.tons.toFixed(2)}`,
+        `avg_fuel_per_trip_percent,${(sim.shift.trips > 0 ? sim.shift.fuelSpentInTrips / sim.shift.trips : 0).toFixed(3)}`
+      ];
+      lines.push("");
+      lines.push("trip_id,type,fuel_spent_percent,duration_sec,reason");
+      for (const t of sim.telemetry.tripLog) {
+        lines.push(`${t.id},${t.type},${t.spent.toFixed(3)},${t.durationSec.toFixed(2)},${t.reason}`);
+      }
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `shift-report-${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      statusText.textContent = "Статус: CSV отчет сохранен";
+    }
+
+    let prevTime = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.05, (now - prevTime) / 1000);
+      prevTime = now;
+      updateOperation(now);
+
+      if (mode === "manual") updateManual(dt);
+      else updateAI(dt);
+      castSensors();
+      updateTelemetry(now);
+      updateUi();
+      drawWorld();
+      drawLidar();
+      drawRadar();
+      drawMiniMap();
+
+      requestAnimationFrame(loop);
+    }
+
+    maps.forEach((m) => {
+      const o = document.createElement("option");
+      o.value = m.id;
+      o.textContent = m.name;
+      mapSelect.appendChild(o);
+    });
+    mapSelect.value = maps[0].id;
+    timeSelect.value = sim.visuals.timeOfDay;
+    weatherSelect.value = sim.visuals.weather;
+
+    manualBtn.addEventListener("click", () => setMode("manual"));
+    aiBtn.addEventListener("click", () => setMode("ai"));
+    resetBtn.addEventListener("click", resetScenario);
+    exportCsvBtn.addEventListener("click", exportShiftCsv);
+    timeSelect.addEventListener("change", () => {
+      sim.visuals.timeOfDay = timeSelect.value;
+    });
+    weatherSelect.addEventListener("change", () => {
+      sim.visuals.weather = weatherSelect.value;
+    });
+    mapSelect.addEventListener("change", () => setMap(mapSelect.value));
+    simCanvas.addEventListener("click", handleMapClick);
+
+    window.addEventListener("keydown", (e) => {
+      keys[e.key.toLowerCase()] = true;
+      if (e.key.toLowerCase() === "e" || e.key.toLowerCase() === "у") {
+        tryManualZoneAction();
+      }
+    });
+    window.addEventListener("keyup", (e) => {
+      keys[e.key.toLowerCase()] = false;
+    });
+
+    setMap(maps[0].id);
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
